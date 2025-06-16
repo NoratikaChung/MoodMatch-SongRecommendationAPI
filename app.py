@@ -2,7 +2,7 @@ from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from io import BytesIO
-from app.moodmatch_core import run_moodmatch
+from moodmatch_core import run_moodmatch
 import uvicorn
 
 app = FastAPI()

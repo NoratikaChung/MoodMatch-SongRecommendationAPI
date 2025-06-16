@@ -1,5 +1,3 @@
-# app/moodmatch_core.py
-
 import os
 import torch
 import spotipy
@@ -7,6 +5,7 @@ from PIL import Image
 from dotenv import load_dotenv
 from transformers import BlipProcessor, BlipForConditionalGeneration, CLIPProcessor, CLIPModel
 from spotipy.oauth2 import SpotifyClientCredentials
+import sqlite3
 
 load_dotenv()
 client_id = os.getenv("SPOTIFY_CLIENT_ID")
@@ -51,27 +50,63 @@ def run_moodmatch(image: Image.Image, language=None, mood=None):
         search_queries.append(f"{predicted_genre} {caption}")
     search_queries.append(caption)
 
+    # 👉 Simulate Spotify failure for testing fallback (uncomment the next line):
+
     # Try Spotify search
-    tracks = []
     for query in search_queries:
         try:
             results = sp.search(q=query, type="track", limit=10)
             if results['tracks']['items']:
                 tracks = results['tracks']['items']
-                break
-        except:
-            continue
+                return {
+                    "caption": caption,
+                    "predicted_genre": predicted_genre,
+                    "top_genres": sorted_genres[:3],
+                    "tracks": [
+                        {
+                            "name": t['name'],
+                            "artists": ", ".join([a['name'] for a in t['artists']]),
+                            "url": t['external_urls']['spotify']
+                        }
+                        for t in tracks
+                    ]
+                }
+        except Exception as e:
+            print("⚠️ Spotify error:", e)
 
-    return {
-        "caption": caption,
-        "predicted_genre": predicted_genre,
-        "top_genres": sorted_genres[:3],
-        "tracks": [
-            {
-                "name": t['name'],
-                "artist": ", ".join([a['name'] for a in t['artists']]),
-                "url": t['external_urls']['spotify']
-            }
-            for t in tracks
-        ]
-    }
+    # Fallback to local DB
+    try:
+        db = sqlite3.connect("fallback_songs.db")
+        cur = db.cursor()
+        cur.execute("""
+            SELECT name, artists, url FROM songs
+            WHERE genre = ? AND language = ?
+            ORDER BY RANDOM() LIMIT 10
+        """, (predicted_genre, language or "english"))
+        fallback_tracks = cur.fetchall()
+        db.close()
+
+        print("📀 Using fallback DB!")  # ✅ Debug print to confirm fallback is used
+
+        return {
+            "caption": caption,
+            "predicted_genre": predicted_genre,
+            "top_genres": sorted_genres[:3],
+            "tracks": [
+                {
+                    "name": row[0],
+                    "artists": row[1],
+                    "url": row[2]
+                }
+                for row in fallback_tracks
+            ]
+        }
+
+    except Exception as e:
+        print("❌ Fallback DB error:", e)
+        return {
+            "caption": caption,
+            "predicted_genre": predicted_genre,
+            "top_genres": sorted_genres[:3],
+            "tracks": []
+        }
